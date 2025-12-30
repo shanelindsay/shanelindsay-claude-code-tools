@@ -113,6 +113,8 @@ struct Session {
     last_msg_role: String,
     last_msg_content: String,
     first_user_msg_content: String,
+    last_user_msg_content: String,
+    last_assistant_msg_content: String,
     total_tokens: i64,
     derivation_type: String,  // "trimmed", "continued", or ""
     is_sidechain: bool,       // Sub-agent session
@@ -3147,6 +3149,8 @@ fn load_sessions(index_path: &str, limit: usize) -> Result<Vec<Session>> {
     let last_msg_role_field = schema.get_field("last_msg_role").context("missing last_msg_role")?;
     let last_msg_content_field = schema.get_field("last_msg_content").context("missing last_msg_content")?;
     let first_user_msg_content_field = schema.get_field("first_user_msg_content").ok();
+    let last_user_msg_content_field = schema.get_field("last_user_msg_content").ok();
+    let last_assistant_msg_content_field = schema.get_field("last_assistant_msg_content").ok();
     let total_tokens_field = schema.get_field("total_tokens").ok();
     let derivation_type_field = schema.get_field("derivation_type").context("missing derivation_type")?;
     let is_sidechain_field = schema.get_field("is_sidechain").context("missing is_sidechain")?;
@@ -3219,6 +3223,12 @@ fn load_sessions(index_path: &str, limit: usize) -> Result<Vec<Session>> {
             last_msg_role: get_text(last_msg_role_field),
             last_msg_content: get_text(last_msg_content_field),
             first_user_msg_content: first_user_msg_content_field
+                .map(|f| get_text(f))
+                .unwrap_or_default(),
+            last_user_msg_content: last_user_msg_content_field
+                .map(|f| get_text(f))
+                .unwrap_or_default(),
+            last_assistant_msg_content: last_assistant_msg_content_field
                 .map(|f| get_text(f))
                 .unwrap_or_default(),
             total_tokens,
@@ -3900,6 +3910,8 @@ fn output_json(app: &App, limit: Option<usize>) -> Result<()> {
             "first_msg": s.first_msg_content,
             "last_msg": s.last_msg_content,
             "first_user_msg": s.first_user_msg_content,
+            "last_user_msg": s.last_user_msg_content,
+            "last_assistant_msg": s.last_assistant_msg_content,
             "total_tokens": s.total_tokens,
             "file_path": s.export_path,
             "derivation_type": s.derivation_type,

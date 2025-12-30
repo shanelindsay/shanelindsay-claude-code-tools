@@ -186,6 +186,8 @@ class SessionIndex:
         self.schema_builder.add_text_field("last_msg_role", stored=True)
         self.schema_builder.add_text_field("last_msg_content", stored=True)
         self.schema_builder.add_text_field("first_user_msg_content", stored=True)
+        self.schema_builder.add_text_field("last_user_msg_content", stored=True)
+        self.schema_builder.add_text_field("last_assistant_msg_content", stored=True)
         self.schema_builder.add_integer_field("total_tokens", stored=True)
 
         # Session type fields (for filtering in TUI)
@@ -341,6 +343,18 @@ class SessionIndex:
             else:
                 first_user_content = str(first_user_msg)
             doc.add_text("first_user_msg_content", first_user_content)
+            last_user_msg = metadata.get("last_user_msg", {}) or {}
+            if isinstance(last_user_msg, dict):
+                last_user_content = last_user_msg.get("content", "")
+            else:
+                last_user_content = str(last_user_msg)
+            doc.add_text("last_user_msg_content", last_user_content)
+            last_assistant_msg = metadata.get("last_assistant_msg", {}) or {}
+            if isinstance(last_assistant_msg, dict):
+                last_assistant_content = last_assistant_msg.get("content", "")
+            else:
+                last_assistant_content = str(last_assistant_msg)
+            doc.add_text("last_assistant_msg_content", last_assistant_content)
             doc.add_integer("total_tokens", _safe_int(metadata.get("total_tokens")))
             first_user_msg = metadata.get("first_user_msg", {}) or {}
             if isinstance(first_user_msg, dict):
@@ -654,6 +668,8 @@ class SessionIndex:
             first_msg = metadata.get("first_msg") or {"role": "", "content": ""}
             last_msg = metadata.get("last_msg") or {"role": "", "content": ""}
             first_user_msg = metadata.get("first_user_msg") or {"role": "", "content": ""}
+            last_user_msg = metadata.get("last_user_msg") or {"role": "", "content": ""}
+            last_assistant_msg = metadata.get("last_assistant_msg") or {"role": "", "content": ""}
             total_tokens = metadata.get("total_tokens")
 
             # Always use filename-derived session_id (the canonical identifier)
@@ -681,6 +697,8 @@ class SessionIndex:
                 "first_msg": first_msg,
                 "last_msg": last_msg,
                 "first_user_msg": first_user_msg,
+                "last_user_msg": last_user_msg,
+                "last_assistant_msg": last_assistant_msg,
                 "lines": msg_count,
                 "total_tokens": total_tokens,
                 "file_path": str(jsonl_path),
@@ -765,6 +783,8 @@ class SessionIndex:
             first_msg = parsed["first_msg"]
             last_msg = parsed["last_msg"]
             first_user_msg = parsed.get("first_user_msg", {}) or {}
+            last_user_msg = parsed.get("last_user_msg", {}) or {}
+            last_assistant_msg = parsed.get("last_assistant_msg", {}) or {}
 
             # Skip helper sessions (SDK/headless sessions used for analysis)
             if metadata.get("session_type") == "helper":
@@ -813,6 +833,16 @@ class SessionIndex:
                 else:
                     first_user_content = str(first_user_msg)
                 doc.add_text("first_user_msg_content", first_user_content)
+                if isinstance(last_user_msg, dict):
+                    last_user_content = last_user_msg.get("content", "")
+                else:
+                    last_user_content = str(last_user_msg)
+                doc.add_text("last_user_msg_content", last_user_content)
+                if isinstance(last_assistant_msg, dict):
+                    last_assistant_content = last_assistant_msg.get("content", "")
+                else:
+                    last_assistant_content = str(last_assistant_msg)
+                doc.add_text("last_assistant_msg_content", last_assistant_content)
                 doc.add_integer("total_tokens", _safe_int(parsed.get("total_tokens")))
 
                 # Session type fields
@@ -1037,6 +1067,8 @@ class SessionIndex:
             last_msg_role = doc.get_first("last_msg_role") or ""
             last_msg_content = doc.get_first("last_msg_content") or ""
             first_user_msg_content = doc.get_first("first_user_msg_content") or ""
+            last_user_msg_content = doc.get_first("last_user_msg_content") or ""
+            last_assistant_msg_content = doc.get_first("last_assistant_msg_content") or ""
             total_tokens = _safe_int(doc.get_first("total_tokens"))
 
             results.append({
@@ -1056,6 +1088,8 @@ class SessionIndex:
                 "last_msg_role": last_msg_role,
                 "last_msg_content": last_msg_content,
                 "first_user_msg_content": first_user_msg_content,
+                "last_user_msg_content": last_user_msg_content,
+                "last_assistant_msg_content": last_assistant_msg_content,
                 "total_tokens": total_tokens,
             })
 
@@ -1121,6 +1155,8 @@ class SessionIndex:
                 "last_msg_role": doc.get_first("last_msg_role") or "",
                 "last_msg_content": doc.get_first("last_msg_content") or "",
                 "first_user_msg_content": doc.get_first("first_user_msg_content") or "",
+                "last_user_msg_content": doc.get_first("last_user_msg_content") or "",
+                "last_assistant_msg_content": doc.get_first("last_assistant_msg_content") or "",
                 "total_tokens": _safe_int(doc.get_first("total_tokens")),
                 "claude_home": doc.get_first("claude_home") or "",
             })
@@ -1222,6 +1258,8 @@ class SessionIndex:
                 "last_msg_role": doc.get_first("last_msg_role") or "",
                 "last_msg_content": doc.get_first("last_msg_content") or "",
                 "first_user_msg_content": doc.get_first("first_user_msg_content") or "",
+                "last_user_msg_content": doc.get_first("last_user_msg_content") or "",
+                "last_assistant_msg_content": doc.get_first("last_assistant_msg_content") or "",
                 "total_tokens": _safe_int(doc.get_first("total_tokens")),
                 "derivation_type": doc.get_first("derivation_type") or "",
                 "is_sidechain": doc.get_first("is_sidechain") or "false",

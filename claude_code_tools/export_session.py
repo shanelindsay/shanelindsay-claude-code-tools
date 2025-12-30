@@ -36,6 +36,20 @@ def _truncate_text(text: str, max_length: int = 200) -> str:
     return text[: max_length - 3] + "..."
 
 
+def _is_agents_preamble(text: str) -> bool:
+    """Detect the AGENTS.md preload so we can skip it for user previews."""
+    cleaned = text.strip()
+    if not cleaned:
+        return False
+    if cleaned.startswith("# AGENTS.md"):
+        return True
+    if "AGENTS.md" in cleaned and "<INSTRUCTIONS>" in cleaned:
+        return True
+    if "<environment_context>" in cleaned:
+        return True
+    return False
+
+
 def _get_last_line_timestamp(file_path: Path) -> Optional[str]:
     """
     Efficiently read the last line of a JSONL file and extract its timestamp.
@@ -145,21 +159,26 @@ def extract_first_last_messages(
     Optional[dict[str, str]],
     Optional[dict[str, str]],
     Optional[dict[str, str]],
+    Optional[dict[str, str]],
+    Optional[dict[str, str]],
 ]:
     """
-    Extract first/last messages and the first user message from a session.
+    Extract first/last messages, first/last user messages, and last assistant.
 
     Args:
         session_file: Path to session JSONL file
         agent: Agent type ('claude' or 'codex')
 
     Returns:
-        Tuple of (first_msg, last_msg, first_user_msg) where each is a dict
-        with 'role' and 'content' keys, or None if not found
+        Tuple of (first_msg, last_msg, first_user_msg, last_user_msg,
+        last_assistant_msg) where each is a dict with 'role' and 'content'
+        keys, or None if not found
     """
     first_msg: Optional[dict[str, str]] = None
     last_msg: Optional[dict[str, str]] = None
     first_user_msg: Optional[dict[str, str]] = None
+    last_user_msg: Optional[dict[str, str]] = None
+    last_assistant_msg: Optional[dict[str, str]] = None
 
     try:
         with open(session_file, "r", encoding="utf-8") as f:
@@ -189,21 +208,30 @@ def extract_first_last_messages(
                             text = _extract_codex_message_text(data)
 
                 if role and text:
-                    msg_dict = {
-                        "role": role,
-                        "content": _truncate_text(text),
-                    }
+                    def _msg(limit: int) -> dict[str, str]:
+                        return {
+                            "role": role,
+                            "content": _truncate_text(text, limit),
+                        }
+
                     if first_msg is None:
-                        first_msg = msg_dict
-                    if role == "user" and first_user_msg is None:
-                        first_user_msg = msg_dict
+                        first_msg = _msg(200)
+
+                    if role == "user":
+                        if not _is_agents_preamble(text):
+                            if first_user_msg is None:
+                                first_user_msg = _msg(200)
+                            last_user_msg = _msg(200)
+                    elif role == "assistant":
+                        last_assistant_msg = _msg(1000)
+
                     # Always update last_msg to get the last one
-                    last_msg = msg_dict
+                    last_msg = _msg(200)
 
     except (OSError, IOError):
         pass
 
-    return first_msg, last_msg, first_user_msg
+    return first_msg, last_msg, first_user_msg, last_user_msg, last_assistant_msg
 
 
 def extract_session_metadata(session_file: Path, agent: str) -> dict[str, Any]:
@@ -244,6 +272,8 @@ def extract_session_metadata(session_file: Path, agent: str) -> dict[str, Any]:
         "first_msg": None,
         "last_msg": None,
         "first_user_msg": None,
+        "last_user_msg": None,
+        "last_assistant_msg": None,
         "total_tokens": None,
     }
 
@@ -386,8 +416,12 @@ def extract_session_metadata(session_file: Path, agent: str) -> dict[str, Any]:
                 payload = data.get("payload", {})
                 if payload.get("type") != "token_count":
                     continue
-                info = payload.get("info", {})
-                total_usage = info.get("total_token_usage", {})
+                info = payload.get("info") or {}
+                if not isinstance(info, dict):
+                    continue
+                total_usage = info.get("total_token_usage") or {}
+                if not isinstance(total_usage, dict):
+                    continue
                 total_value = total_usage.get("total_tokens")
                 if total_value is None:
                     continue
@@ -406,12 +440,14 @@ def extract_session_metadata(session_file: Path, agent: str) -> dict[str, Any]:
         metadata["project"] = Path(metadata["cwd"]).name
 
     # Extract first and last messages
-    first_msg, last_msg, first_user_msg = extract_first_last_messages(
-        session_file, agent
+    first_msg, last_msg, first_user_msg, last_user_msg, last_assistant_msg = (
+        extract_first_last_messages(session_file, agent)
     )
     metadata["first_msg"] = first_msg
     metadata["last_msg"] = last_msg
     metadata["first_user_msg"] = first_user_msg
+    metadata["last_user_msg"] = last_user_msg
+    metadata["last_assistant_msg"] = last_assistant_msg
 
     return metadata
 
@@ -500,6 +536,10 @@ def generate_yaml_frontmatter(metadata: dict[str, Any]) -> str:
         yaml_data["last_msg"] = metadata["last_msg"]
     if metadata.get("first_user_msg"):
         yaml_data["first_user_msg"] = metadata["first_user_msg"]
+    if metadata.get("last_user_msg"):
+        yaml_data["last_user_msg"] = metadata["last_user_msg"]
+    if metadata.get("last_assistant_msg"):
+        yaml_data["last_assistant_msg"] = metadata["last_assistant_msg"]
 
     # Trim stats (only for trimmed sessions)
     if metadata.get("trim_stats"):
