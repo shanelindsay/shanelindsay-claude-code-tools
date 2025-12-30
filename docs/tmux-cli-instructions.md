@@ -66,6 +66,28 @@ tmux-cli list_panes
 # Returns: JSON with pane IDs, indices, and status
 ```
 
+### List panes in a specific session/window (local mode)
+```bash
+tmux-cli list_panes myapp 1
+# Returns: JSON with pane IDs plus session/window metadata
+```
+
+### List sessions (local mode)
+```bash
+tmux-cli list_sessions
+# Returns: JSON with session names, window counts, and attached status
+```
+
+### List windows (local or remote)
+```bash
+tmux-cli list_windows
+# Local mode: lists windows in current session
+# Remote mode: lists windows in managed session
+
+tmux-cli list_windows myapp
+# Local mode: lists windows in the specified session
+```
+
 ### Show current tmux status
 ```bash
 tmux-cli status

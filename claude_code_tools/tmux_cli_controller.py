@@ -220,15 +220,65 @@ class TmuxCLIController:
         output, code = self._run_tmux_command(['display-message', '-p', '#{window_id}'])
         return output if code == 0 else None
     
-    def list_panes(self) -> List[Dict[str, str]]:
+    def list_sessions(self) -> List[Dict[str, str]]:
+        """List all tmux sessions."""
+        output, code = self._run_tmux_command([
+            'list-sessions',
+            '-F', '#{session_name}|#{session_windows}|#{session_attached}'
+        ])
+        if code != 0 or not output:
+            return []
+        sessions = []
+        for line in output.split('\n'):
+            if not line:
+                continue
+            name, windows, attached = line.split('|')
+            sessions.append({
+                'name': name,
+                'windows': windows,
+                'attached': attached == '1'
+            })
+        return sessions
+
+    def list_windows(self, session_name: Optional[str] = None) -> List[Dict[str, str]]:
+        """List windows in a session (defaults to current)."""
+        target = session_name or self.get_current_session()
+        if not target:
+            return []
+        output, code = self._run_tmux_command([
+            'list-windows',
+            '-t', target,
+            '-F', '#{session_name}|#{window_index}|#{window_name}|#{window_active}|#{window_width}x#{window_height}'
+        ])
+        if code != 0 or not output:
+            return []
+        windows = []
+        for line in output.split('\n'):
+            if not line:
+                continue
+            session, idx, name, active, size = line.split('|')
+            windows.append({
+                'session': session,
+                'index': idx,
+                'title': name,
+                'active': active == '1',
+                'size': size
+            })
+        return windows
+
+    def list_panes(self, session_name: Optional[str] = None, window_name: Optional[str] = None) -> List[Dict[str, str]]:
         """
-        List all panes in the current window.
+        List panes in the current window, or in a specified session/window.
 
         Returns:
             List of dicts with pane info (id, index, title, active, size, command, formatted_id)
         """
         # Use explicit target if provided
-        if self.session_name and self.window_name:
+        if session_name and window_name:
+            target = f"{session_name}:{window_name}"
+        elif session_name and not window_name:
+            target = session_name
+        elif self.session_name and self.window_name:
             target = f"{self.session_name}:{self.window_name}"
         else:
             # Use the window where the command is being executed from
@@ -238,13 +288,13 @@ class TmuxCLIController:
             output, code = self._run_tmux_command([
                 'list-panes',
                 '-t', target,
-                '-F', '#{pane_id}|#{pane_index}|#{pane_title}|#{pane_active}|#{pane_width}x#{pane_height}|#{pane_current_command}'
+                '-F', '#{session_name}|#{window_index}|#{window_name}|#{pane_id}|#{pane_index}|#{pane_title}|#{pane_active}|#{pane_width}x#{pane_height}|#{pane_current_command}'
             ])
         else:
             # Fallback to default behavior
             output, code = self._run_tmux_command([
                 'list-panes',
-                '-F', '#{pane_id}|#{pane_index}|#{pane_title}|#{pane_active}|#{pane_width}x#{pane_height}|#{pane_current_command}'
+                '-F', '#{session_name}|#{window_index}|#{window_name}|#{pane_id}|#{pane_index}|#{pane_title}|#{pane_active}|#{pane_width}x#{pane_height}|#{pane_current_command}'
             ])
         
         if code != 0:
@@ -254,14 +304,20 @@ class TmuxCLIController:
         for line in output.split('\n'):
             if line:
                 parts = line.split('|')
-                pane_id = parts[0]
+                session_name = parts[0]
+                window_index = parts[1]
+                window_name = parts[2]
+                pane_id = parts[3]
                 panes.append({
                     'id': pane_id,
-                    'index': parts[1],
-                    'title': parts[2],
-                    'active': parts[3] == '1',
-                    'size': parts[4],
-                    'command': parts[5] if len(parts) > 5 else '',
+                    'index': parts[4],
+                    'title': parts[5],
+                    'active': parts[6] == '1',
+                    'size': parts[7],
+                    'command': parts[8] if len(parts) > 8 else '',
+                    'session': session_name,
+                    'window_index': window_index,
+                    'window_name': window_name,
                     'formatted_id': self.format_pane_identifier(pane_id)
                 })
         return panes
@@ -633,8 +689,22 @@ class CLI:
         else:
             print("\nNo panes found")
     
-    def list_panes(self):
-        """List all panes in current window."""
+    def list_sessions(self):
+        """List all tmux sessions (local mode only)."""
+        if self.mode != 'local':
+            print("List_sessions is only available in local mode.")
+            return
+        sessions = self.controller.list_sessions()
+        print(json.dumps(sessions, indent=2))
+
+    def list_panes(self, session: Optional[str] = None, window: Optional[str] = None):
+        """List panes in current window, or in a specified session/window (local mode)."""
+        if self.mode == 'local':
+            panes = self.controller.list_panes(session_name=session, window_name=window)
+            print(json.dumps(panes, indent=2))
+            return
+        if session or window:
+            print("Ignoring session/window override in remote mode; using managed session.")
         panes = self.controller.list_panes()
         print(json.dumps(panes, indent=2))
     
@@ -798,17 +868,20 @@ class CLI:
             return
         self.controller.cleanup_session()
     
-    def list_windows(self):
-        """List all windows in the session (remote mode only)."""
+    def list_windows(self, session: Optional[str] = None):
+        """List windows (local: any session; remote: managed session only)."""
         if self.mode == 'local':
-            print("List_windows is only available in remote mode. Use list_panes instead.")
+            windows = self.controller.list_windows(session_name=session)
+            print(json.dumps(windows, indent=2))
             return
-        
+
+        if session:
+            print("Ignoring session override in remote mode; using managed session.")
         windows = self.controller.list_windows()
         if not windows:
             print(f"No windows in session '{self.controller.session_name}'")
             return
-        
+
         print(f"Windows in session '{self.controller.session_name}':")
         for w in windows:
             active = " (active)" if w['active'] else ""
