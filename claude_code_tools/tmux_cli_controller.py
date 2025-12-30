@@ -266,6 +266,13 @@ class TmuxCLIController:
             })
         return windows
 
+    def kill_session(self, session_name: str) -> bool:
+        """Kill a tmux session by name."""
+        if not session_name:
+            return False
+        _, code = self._run_tmux_command(['kill-session', '-t', session_name])
+        return code == 0
+
     def list_panes(self, session_name: Optional[str] = None, window_name: Optional[str] = None) -> List[Dict[str, str]]:
         """
         List panes in the current window, or in a specified session/window.
@@ -707,6 +714,20 @@ class CLI:
             print("Ignoring session/window override in remote mode; using managed session.")
         panes = self.controller.list_panes()
         print(json.dumps(panes, indent=2))
+
+    def kill_session(self, session: Optional[str] = None):
+        """Kill a tmux session by name (local mode only)."""
+        if self.mode != 'local':
+            print("Kill_session is only available in local mode.")
+            return
+        if not session:
+            print("Session name required.")
+            return
+        ok = self.controller.kill_session(session_name=session)
+        if ok:
+            print(f"Killed session '{session}'")
+        else:
+            print(f"Failed to kill session '{session}'")
     
     def launch(self, command: str, vertical: bool = True, size: int = 50, name: Optional[str] = None):
         """Launch a command in a new pane/window.

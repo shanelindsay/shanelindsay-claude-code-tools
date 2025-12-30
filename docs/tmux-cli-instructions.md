@@ -78,6 +78,11 @@ tmux-cli list_sessions
 # Returns: JSON with session names, window counts, and attached status
 ```
 
+### Kill a session (local mode)
+```bash
+tmux-cli kill_session mysession
+```
+
 ### List windows (local or remote)
 ```bash
 tmux-cli list_windows
