@@ -1999,6 +1999,17 @@ fn render_preview(frame: &mut Frame, app: &mut App, t: &Theme, area: Rect) {
     let bubble_width = area.width.saturating_sub(4) as usize;
     let mut lines: Vec<Line> = Vec::new();
 
+    if s.total_tokens > 0 {
+        lines.push(Line::from(vec![
+            Span::styled(" Tokens: ", Style::default().fg(t.dim_fg)),
+            Span::styled(
+                format_with_commas(s.total_tokens),
+                Style::default().fg(t.accent).add_modifier(Modifier::BOLD),
+            ),
+        ]));
+        lines.push(Line::from(""));
+    }
+
     // First message - labeled as "FIRST MESSAGE"
     if !s.first_msg_content.is_empty() {
         let (role_label, label_color, bubble_bg) = if s.first_msg_role == "user" {
@@ -3119,6 +3130,28 @@ fn format_time_ago(modified: &str) -> String {
         format!("{}w ago", duration.num_weeks())
     } else {
         dt.format("%b %d").to_string()
+    }
+}
+
+fn format_with_commas(value: i64) -> String {
+    let mut s = value.abs().to_string();
+    if s.len() <= 3 {
+        return if value < 0 { format!("-{}", s) } else { s };
+    }
+
+    let mut parts: Vec<String> = Vec::new();
+    while s.len() > 3 {
+        let tail = s.split_off(s.len() - 3);
+        parts.push(tail);
+    }
+    parts.push(s);
+    parts.reverse();
+
+    let joined = parts.join(",");
+    if value < 0 {
+        format!("-{}", joined)
+    } else {
+        joined
     }
 }
 

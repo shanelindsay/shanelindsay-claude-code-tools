@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.3.13 - 2025-12-30
+- Show total tokens in the TUI preview pane.
+
 ## 1.3.12 - 2025-12-30
 - Skip environment context blocks when deriving user previews.
 
