@@ -270,7 +270,7 @@ class TmuxCLIController:
         """Kill a tmux session by name."""
         if not session_name:
             return False
-        _, code = self._run_tmux_command(['kill-session', '-t', session_name])
+        _, code = self._run_tmux_command(['kill-session', '-t', str(session_name)])
         return code == 0
 
     def list_panes(self, session_name: Optional[str] = None, window_name: Optional[str] = None) -> List[Dict[str, str]]:
