@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.3.17 - 2025-12-30
+- Add session/window listing support to tmux-cli in local mode.
+- Allow list_panes to target a specific session/window.
+
+## 1.3.16 - 2025-12-30
+- Skip Codex git repo checks for query to avoid trusted-dir failures.
+
+## 1.3.15 - 2025-12-30
+- Make query use a sanitized transcript (first user + last 100 assistant messages).
+- Use Codex 5.1 mini for codex sessions in CLI query.
+
+## 1.3.14 - 2025-12-30
+- Add cached/noncached token totals and cached share to JSON output.
+- Show cached/noncached breakdown in the TUI preview pane.
+
 ## 1.3.13 - 2025-12-30
 - Show total tokens in the TUI preview pane.
 
