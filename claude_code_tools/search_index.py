@@ -82,6 +82,14 @@ def _safe_int(value: Any, default: int = 0) -> int:
         return default
 
 
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    """Best-effort float coercion with fallback."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
 @dataclass
 class SearchResult:
     """A search result with metadata and snippet."""
@@ -189,6 +197,9 @@ class SessionIndex:
         self.schema_builder.add_text_field("last_user_msg_content", stored=True)
         self.schema_builder.add_text_field("last_assistant_msg_content", stored=True)
         self.schema_builder.add_integer_field("total_tokens", stored=True)
+        self.schema_builder.add_integer_field("total_cached_tokens", stored=True)
+        self.schema_builder.add_integer_field("total_noncached_tokens", stored=True)
+        self.schema_builder.add_float_field("cached_share", stored=True)
 
         # Session type fields (for filtering in TUI)
         self.schema_builder.add_text_field("derivation_type", stored=True)
@@ -356,6 +367,9 @@ class SessionIndex:
                 last_assistant_content = str(last_assistant_msg)
             doc.add_text("last_assistant_msg_content", last_assistant_content)
             doc.add_integer("total_tokens", _safe_int(metadata.get("total_tokens")))
+            doc.add_integer("total_cached_tokens", _safe_int(metadata.get("total_cached_tokens")))
+            doc.add_integer("total_noncached_tokens", _safe_int(metadata.get("total_noncached_tokens")))
+            doc.add_float("cached_share", _safe_float(metadata.get("cached_share")))
             first_user_msg = metadata.get("first_user_msg", {}) or {}
             if isinstance(first_user_msg, dict):
                 first_user_content = first_user_msg.get("content", "")
@@ -671,6 +685,9 @@ class SessionIndex:
             last_user_msg = metadata.get("last_user_msg") or {"role": "", "content": ""}
             last_assistant_msg = metadata.get("last_assistant_msg") or {"role": "", "content": ""}
             total_tokens = metadata.get("total_tokens")
+            total_cached_tokens = metadata.get("total_cached_tokens")
+            total_noncached_tokens = metadata.get("total_noncached_tokens")
+            cached_share = metadata.get("cached_share")
 
             # Always use filename-derived session_id (the canonical identifier)
             # Internal sessionId field can be stale in forked sessions
@@ -701,6 +718,9 @@ class SessionIndex:
                 "last_assistant_msg": last_assistant_msg,
                 "lines": msg_count,
                 "total_tokens": total_tokens,
+                "total_cached_tokens": total_cached_tokens,
+                "total_noncached_tokens": total_noncached_tokens,
+                "cached_share": cached_share,
                 "file_path": str(jsonl_path),
             }
         except Exception as e:
@@ -844,6 +864,9 @@ class SessionIndex:
                     last_assistant_content = str(last_assistant_msg)
                 doc.add_text("last_assistant_msg_content", last_assistant_content)
                 doc.add_integer("total_tokens", _safe_int(parsed.get("total_tokens")))
+                doc.add_integer("total_cached_tokens", _safe_int(parsed.get("total_cached_tokens")))
+                doc.add_integer("total_noncached_tokens", _safe_int(parsed.get("total_noncached_tokens")))
+                doc.add_float("cached_share", _safe_float(parsed.get("cached_share")))
 
                 # Session type fields
                 doc.add_text(
@@ -1070,6 +1093,9 @@ class SessionIndex:
             last_user_msg_content = doc.get_first("last_user_msg_content") or ""
             last_assistant_msg_content = doc.get_first("last_assistant_msg_content") or ""
             total_tokens = _safe_int(doc.get_first("total_tokens"))
+            total_cached_tokens = _safe_int(doc.get_first("total_cached_tokens"))
+            total_noncached_tokens = _safe_int(doc.get_first("total_noncached_tokens"))
+            cached_share = _safe_float(doc.get_first("cached_share"))
 
             results.append({
                 "session_id": session_id,
@@ -1091,6 +1117,9 @@ class SessionIndex:
                 "last_user_msg_content": last_user_msg_content,
                 "last_assistant_msg_content": last_assistant_msg_content,
                 "total_tokens": total_tokens,
+                "total_cached_tokens": total_cached_tokens,
+                "total_noncached_tokens": total_noncached_tokens,
+                "cached_share": cached_share,
             })
 
             if len(results) >= limit:
@@ -1158,6 +1187,9 @@ class SessionIndex:
                 "last_user_msg_content": doc.get_first("last_user_msg_content") or "",
                 "last_assistant_msg_content": doc.get_first("last_assistant_msg_content") or "",
                 "total_tokens": _safe_int(doc.get_first("total_tokens")),
+                "total_cached_tokens": _safe_int(doc.get_first("total_cached_tokens")),
+                "total_noncached_tokens": _safe_int(doc.get_first("total_noncached_tokens")),
+                "cached_share": _safe_float(doc.get_first("cached_share")),
                 "claude_home": doc.get_first("claude_home") or "",
             })
 
@@ -1261,6 +1293,9 @@ class SessionIndex:
                 "last_user_msg_content": doc.get_first("last_user_msg_content") or "",
                 "last_assistant_msg_content": doc.get_first("last_assistant_msg_content") or "",
                 "total_tokens": _safe_int(doc.get_first("total_tokens")),
+                "total_cached_tokens": _safe_int(doc.get_first("total_cached_tokens")),
+                "total_noncached_tokens": _safe_int(doc.get_first("total_noncached_tokens")),
+                "cached_share": _safe_float(doc.get_first("cached_share")),
                 "derivation_type": doc.get_first("derivation_type") or "",
                 "is_sidechain": doc.get_first("is_sidechain") or "false",
             }

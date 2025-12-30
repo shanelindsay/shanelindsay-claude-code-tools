@@ -116,6 +116,9 @@ struct Session {
     last_user_msg_content: String,
     last_assistant_msg_content: String,
     total_tokens: i64,
+    total_cached_tokens: i64,
+    total_noncached_tokens: i64,
+    cached_share: f64,
     derivation_type: String,  // "trimmed", "continued", or ""
     is_sidechain: bool,       // Sub-agent session
     claude_home: String,      // Source Claude home directory
@@ -1924,8 +1927,13 @@ fn render_session_list(frame: &mut Frame, app: &mut App, t: &Theme, area: Rect) 
             let effective_snippet_width = snippet_width.saturating_sub(title_len);
 
             let snippet_line = if app.query.is_empty() {
-                // No query: show last message content
-                let snippet = truncate(&s.last_msg_content, effective_snippet_width);
+                // No query: show last assistant message (fallback to last message)
+                let snippet_source = if !s.last_assistant_msg_content.is_empty() {
+                    &s.last_assistant_msg_content
+                } else {
+                    &s.last_msg_content
+                };
+                let snippet = truncate(snippet_source, effective_snippet_width);
                 let mut spans = vec![Span::styled(indent.clone(), snippet_style)];
                 if let Some(ref tp) = title_prefix {
                     spans.push(Span::styled(tp.clone(), title_style));
@@ -2000,12 +2008,33 @@ fn render_preview(frame: &mut Frame, app: &mut App, t: &Theme, area: Rect) {
     let mut lines: Vec<Line> = Vec::new();
 
     if s.total_tokens > 0 {
+        let cached_pct = if s.cached_share > 0.0 {
+            format!("{:.1}%", s.cached_share * 100.0)
+        } else {
+            "0.0%".to_string()
+        };
         lines.push(Line::from(vec![
             Span::styled(" Tokens: ", Style::default().fg(t.dim_fg)),
             Span::styled(
                 format_with_commas(s.total_tokens),
                 Style::default().fg(t.accent).add_modifier(Modifier::BOLD),
             ),
+            Span::styled("  (noncached ", Style::default().fg(t.dim_fg)),
+            Span::styled(
+                format_with_commas(s.total_noncached_tokens),
+                Style::default().fg(t.accent),
+            ),
+            Span::styled(", cached ", Style::default().fg(t.dim_fg)),
+            Span::styled(
+                format_with_commas(s.total_cached_tokens),
+                Style::default().fg(t.accent),
+            ),
+            Span::styled(", ", Style::default().fg(t.dim_fg)),
+            Span::styled(
+                cached_pct,
+                Style::default().fg(t.accent),
+            ),
+            Span::styled(")", Style::default().fg(t.dim_fg)),
         ]));
         lines.push(Line::from(""));
     }
@@ -2075,9 +2104,19 @@ fn render_preview(frame: &mut Frame, app: &mut App, t: &Theme, area: Rect) {
         }
     }
 
-    // Last message - labeled as "LAST MESSAGE" (if different from first)
-    if !s.last_msg_content.is_empty() && s.last_msg_content != s.first_msg_content {
-        let (role_label, label_color, bubble_bg) = if s.last_msg_role == "user" {
+    // Last assistant message (fallback to last message) - labeled as "LAST"
+    let last_preview_content = if !s.last_assistant_msg_content.is_empty() {
+        &s.last_assistant_msg_content
+    } else {
+        &s.last_msg_content
+    };
+    let last_preview_role = if !s.last_assistant_msg_content.is_empty() {
+        "assistant"
+    } else {
+        s.last_msg_role.as_str()
+    };
+    if !last_preview_content.is_empty() && last_preview_content != &s.first_msg_content {
+        let (role_label, label_color, bubble_bg) = if last_preview_role == "user" {
             ("User", t.user_label, t.user_bubble_bg)
         } else if s.agent == "claude" {
             ("Claude", t.claude_source, t.claude_bubble_bg)
@@ -2090,7 +2129,7 @@ fn render_preview(frame: &mut Frame, app: &mut App, t: &Theme, area: Rect) {
             Span::styled(role_label, Style::default().fg(label_color).add_modifier(Modifier::BOLD)),
         ]));
 
-        for wrapped in wrap_text(&s.last_msg_content, bubble_width).iter().take(6) {
+        for wrapped in wrap_text(last_preview_content, bubble_width).iter().take(6) {
             let padding = bubble_width.saturating_sub(wrapped.chars().count());
             lines.push(Line::from(vec![
                 Span::styled(" ", Style::default().bg(bubble_bg)),
@@ -3185,6 +3224,9 @@ fn load_sessions(index_path: &str, limit: usize) -> Result<Vec<Session>> {
     let last_user_msg_content_field = schema.get_field("last_user_msg_content").ok();
     let last_assistant_msg_content_field = schema.get_field("last_assistant_msg_content").ok();
     let total_tokens_field = schema.get_field("total_tokens").ok();
+    let total_cached_tokens_field = schema.get_field("total_cached_tokens").ok();
+    let total_noncached_tokens_field = schema.get_field("total_noncached_tokens").ok();
+    let cached_share_field = schema.get_field("cached_share").ok();
     let derivation_type_field = schema.get_field("derivation_type").context("missing derivation_type")?;
     let is_sidechain_field = schema.get_field("is_sidechain").context("missing is_sidechain")?;
     // claude_home may not exist in older indexes, so make it optional
@@ -3222,6 +3264,18 @@ fn load_sessions(index_path: &str, limit: usize) -> Result<Vec<Session>> {
             .and_then(|f| doc.get_first(f))
             .and_then(|v| v.as_i64())
             .unwrap_or(0);
+        let total_cached_tokens = total_cached_tokens_field
+            .and_then(|f| doc.get_first(f))
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+        let total_noncached_tokens = total_noncached_tokens_field
+            .and_then(|f| doc.get_first(f))
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+        let cached_share = cached_share_field
+            .and_then(|f| doc.get_first(f))
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0);
 
         let modified_ts = doc
             .get_first(modified_ts_field)
@@ -3265,6 +3319,9 @@ fn load_sessions(index_path: &str, limit: usize) -> Result<Vec<Session>> {
                 .map(|f| get_text(f))
                 .unwrap_or_default(),
             total_tokens,
+            total_cached_tokens,
+            total_noncached_tokens,
+            cached_share,
             derivation_type: get_text(derivation_type_field),
             is_sidechain: is_sidechain_str == "true",
             claude_home,
@@ -3931,6 +3988,13 @@ fn output_json(app: &App, limit: Option<usize>) -> Result<()> {
     // Output as JSONL (one JSON object per line) for easy piping and jq processing
     for &idx in app.filtered.iter().take(limit.unwrap_or(usize::MAX)) {
         let s = &app.sessions[idx];
+        let about = if !s.last_assistant_msg_content.is_empty() {
+            s.last_assistant_msg_content.clone()
+        } else if !s.last_msg_content.is_empty() {
+            s.last_msg_content.clone()
+        } else {
+            s.first_user_msg_content.clone()
+        };
         let obj = json!({
             "session_id": s.session_id,
             "agent": s.agent,
@@ -3945,7 +4009,11 @@ fn output_json(app: &App, limit: Option<usize>) -> Result<()> {
             "first_user_msg": s.first_user_msg_content,
             "last_user_msg": s.last_user_msg_content,
             "last_assistant_msg": s.last_assistant_msg_content,
+            "about": about,
             "total_tokens": s.total_tokens,
+            "total_cached_tokens": s.total_cached_tokens,
+            "total_noncached_tokens": s.total_noncached_tokens,
+            "cached_share": s.cached_share,
             "file_path": s.export_path,
             "derivation_type": s.derivation_type,
             "is_sidechain": s.is_sidechain,

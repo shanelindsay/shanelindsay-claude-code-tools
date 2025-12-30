@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.18 - 2025-12-30
+- Use last assistant message as the default preview snippet when not searching.
+- Add an `about` field (last assistant message fallback) to JSON output.
+
 ## 1.3.17 - 2025-12-30
 - Add session/window listing support to tmux-cli in local mode.
 - Allow list_panes to target a specific session/window.

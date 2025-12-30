@@ -50,6 +50,76 @@ def _is_agents_preamble(text: str) -> bool:
     return False
 
 
+def build_sanitized_transcript(
+    session_file: Path,
+    agent: str,
+    *,
+    assistant_limit: int = 100,
+    assistant_max_len: int = 1000,
+    first_user_max_len: int = 200,
+) -> str:
+    """Build a sanitized transcript for summarization.
+
+    Includes the first non-preamble user message and the last N assistant
+    messages, with per-message truncation.
+    """
+    assistant_msgs: list[str] = []
+    first_user_msg: Optional[str] = None
+
+    try:
+        with open(session_file, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+
+                try:
+                    data = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+
+                role: Optional[str] = None
+                text: Optional[str] = None
+
+                if agent == "claude":
+                    msg_type = data.get("type")
+                    if msg_type in ("user", "assistant"):
+                        role = msg_type
+                        text = _extract_claude_message_text(data)
+                elif agent == "codex":
+                    if data.get("type") == "response_item":
+                        payload = data.get("payload", {})
+                        if payload.get("type") == "message":
+                            role = payload.get("role")
+                            text = _extract_codex_message_text(data)
+
+                if not role or not text:
+                    continue
+
+                if role == "user":
+                    if first_user_msg is None and not _is_agents_preamble(text):
+                        first_user_msg = _truncate_text(text, first_user_max_len)
+                elif role == "assistant":
+                    assistant_msgs.append(_truncate_text(text, assistant_max_len))
+    except (OSError, IOError):
+        pass
+
+    if assistant_limit > 0 and len(assistant_msgs) > assistant_limit:
+        assistant_msgs = assistant_msgs[-assistant_limit:]
+
+    parts: list[str] = []
+    if first_user_msg:
+        parts.append("FIRST USER MESSAGE:")
+        parts.append(first_user_msg)
+        parts.append("")
+
+    if assistant_msgs:
+        parts.append(f"LAST {len(assistant_msgs)} ASSISTANT MESSAGES:")
+        for msg in assistant_msgs:
+            parts.append(f"- {msg}")
+
+    return "\n".join(parts).strip()
+
 def _get_last_line_timestamp(file_path: Path) -> Optional[str]:
     """
     Efficiently read the last line of a JSONL file and extract its timestamp.
@@ -275,6 +345,9 @@ def extract_session_metadata(session_file: Path, agent: str) -> dict[str, Any]:
         "last_user_msg": None,
         "last_assistant_msg": None,
         "total_tokens": None,
+        "total_cached_tokens": None,
+        "total_noncached_tokens": None,
+        "cached_share": None,
     }
 
     # Track session start timestamp from JSON metadata
@@ -401,6 +474,9 @@ def extract_session_metadata(session_file: Path, agent: str) -> dict[str, Any]:
     # Count lines and capture latest total token count (if present)
     try:
         total_tokens: Optional[int] = None
+        total_cached_tokens: Optional[int] = None
+        total_noncached_tokens: Optional[int] = None
+        cached_share: Optional[float] = None
         line_count = 0
         with open(session_file, "r", encoding="utf-8") as f:
             for line in f:
@@ -429,9 +505,43 @@ def extract_session_metadata(session_file: Path, agent: str) -> dict[str, Any]:
                     total_tokens = int(total_value)
                 except (TypeError, ValueError):
                     continue
+                cached_value = total_usage.get("cached_input_tokens")
+                try:
+                    total_cached_tokens = int(cached_value) if cached_value is not None else None
+                except (TypeError, ValueError):
+                    total_cached_tokens = None
+                input_value = total_usage.get("input_tokens")
+                output_value = total_usage.get("output_tokens")
+                reasoning_value = total_usage.get("reasoning_output_tokens")
+                try:
+                    input_tokens = int(input_value) if input_value is not None else None
+                    output_tokens = int(output_value) if output_value is not None else 0
+                    reasoning_tokens = int(reasoning_value) if reasoning_value is not None else 0
+                except (TypeError, ValueError):
+                    input_tokens = None
+                    output_tokens = 0
+                    reasoning_tokens = 0
+                if input_tokens is not None:
+                    if total_cached_tokens is not None:
+                        total_noncached_tokens = (
+                            max(0, input_tokens - total_cached_tokens)
+                            + output_tokens
+                            + reasoning_tokens
+                        )
+                    else:
+                        total_noncached_tokens = input_tokens + output_tokens + reasoning_tokens
+                if total_tokens:
+                    if total_cached_tokens is not None:
+                        cached_share = total_cached_tokens / total_tokens
         metadata["lines"] = line_count
         if total_tokens is not None:
             metadata["total_tokens"] = total_tokens
+        if total_cached_tokens is not None:
+            metadata["total_cached_tokens"] = total_cached_tokens
+        if total_noncached_tokens is not None:
+            metadata["total_noncached_tokens"] = total_noncached_tokens
+        if cached_share is not None:
+            metadata["cached_share"] = cached_share
     except (OSError, IOError):
         metadata["lines"] = 0
 
@@ -512,6 +622,12 @@ def generate_yaml_frontmatter(metadata: dict[str, Any]) -> str:
         yaml_data["lines"] = metadata["lines"]
     if metadata.get("total_tokens") is not None:
         yaml_data["total_tokens"] = metadata["total_tokens"]
+    if metadata.get("total_cached_tokens") is not None:
+        yaml_data["total_cached_tokens"] = metadata["total_cached_tokens"]
+    if metadata.get("total_noncached_tokens") is not None:
+        yaml_data["total_noncached_tokens"] = metadata["total_noncached_tokens"]
+    if metadata.get("cached_share") is not None:
+        yaml_data["cached_share"] = metadata["cached_share"]
     if metadata.get("created"):
         yaml_data["created"] = metadata["created"]
     if metadata.get("modified"):

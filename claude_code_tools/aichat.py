@@ -16,6 +16,7 @@ For backward compatibility, all flat commands (find-claude-session,
 etc.) are still available.
 """
 
+import json
 import click
 
 
@@ -1134,22 +1135,84 @@ def query_session(session, question, agent):
         )
         return
 
-    # Direct query with provided question
-    from claude_code_tools.session_utils import default_export_path
+    # Direct query with provided question (sanitized transcript)
+    from claude_code_tools.export_session import build_sanitized_transcript
 
-    # Export session first
-    if detected_agent == "claude":
-        from claude_code_tools.find_claude_session import handle_export_session
-    else:
-        from claude_code_tools.find_codex_session import handle_export_session
+    sanitized = build_sanitized_transcript(
+        session_file,
+        detected_agent,
+        assistant_limit=100,
+        assistant_max_len=1000,
+        first_user_max_len=200,
+    )
 
-    export_path = default_export_path(session_file, detected_agent)
-    handle_export_session(str(session_file))
+    prompt = f"""You are given a sanitized transcript of a past conversation.
+It includes the first non-preamble user message and the last assistant messages.
+Tool calls/results and system preload blocks are omitted.
 
-    # Query using Claude
+Question:
+{question}
+
+Sanitized transcript:
+{sanitized}
+
+Provide a clear and concise answer."""
+
     import subprocess
-    prompt = f"Read the session transcript at {export_path} and answer: {question}"
-    subprocess.run(["claude", "-p", prompt])
+    if detected_agent == "claude":
+        subprocess.run(
+            [
+                "claude", "-p",
+                "--no-session-persistence",
+                prompt,
+                "--model", "haiku",
+                "--permission-mode", "bypassPermissions",
+            ],
+            check=False,
+        )
+    else:
+        cmd = [
+            "codex", "exec", "--json",
+            "--model", "gpt-5.1-codex-mini",
+            "--skip-git-repo-check",
+            prompt,
+        ]
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=300,
+            stdin=subprocess.DEVNULL,
+        )
+        if result.returncode != 0:
+            print(result.stderr, file=sys.stderr)
+            sys.exit(result.returncode)
+        # Print final agent message if available
+        response_text = ""
+        for line in result.stdout.splitlines():
+            if not line.strip():
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if event.get("type") == "item.completed":
+                item = event.get("item", {})
+                if item.get("type") == "agent_message":
+                    text = item.get("text", "")
+                    if text:
+                        response_text = text
+            elif event.get("type") == "message.delta":
+                delta = event.get("delta", {})
+                if delta.get("type") == "text_delta":
+                    response_text += delta.get("text", "")
+            elif event.get("type") == "message.completed":
+                content = event.get("content", [])
+                for item in content:
+                    if item.get("type") == "text":
+                        response_text = item.get("text", "")
+        if response_text:
+            print(response_text)
 
 
 @main.command("clone")
@@ -1958,7 +2021,8 @@ def index_stats(index, cwd, claude_home, codex_home):
               help='Output as JSONL for AI agents. Fields per line: session_id, '
                    'agent, project, branch, cwd, lines, created, modified, '
                    'first_msg, last_msg, first_user_msg, last_user_msg, '
-                   'last_assistant_msg, total_tokens, file_path, '
+                   'last_assistant_msg, about, total_tokens, total_cached_tokens, '
+                   'total_noncached_tokens, cached_share, file_path, '
                    'derivation_type, is_sidechain, snippet')
 @click.option('--by-time', 'by_time', is_flag=True,
               help='Sort results by last-modified time (default: sort by relevance)')

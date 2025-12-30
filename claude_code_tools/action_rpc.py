@@ -227,49 +227,25 @@ def main() -> None:
             else:
                 _error("Missing file_path")
 
-            # Export session to default export location
-            from claude_code_tools.session_utils import default_export_path
+            from claude_code_tools.export_session import build_sanitized_transcript
 
-            export_path = default_export_path(session_path, agent)
-            export_path.parent.mkdir(parents=True, exist_ok=True)
+            sanitized = build_sanitized_transcript(
+                session_path,
+                agent,
+                assistant_limit=100,
+                assistant_max_len=1000,
+                first_user_max_len=200,
+            )
 
-            if agent == "claude":
-                from claude_code_tools.export_claude_session import (
-                    export_session_to_markdown,
-                )
+            full_prompt = f"""You are given a sanitized transcript of a past conversation.
+It includes the first non-preamble user message and the last assistant messages.
+Tool calls/results and system preload blocks are omitted.
 
-                with open(export_path, "w") as fh:
-                    _quiet_call(
-                        export_session_to_markdown, session_path, fh, verbose=False
-                    )
-            else:
-                from claude_code_tools.find_codex_session import (
-                    handle_export_session,
-                )
-
-                _quiet_call(
-                    handle_export_session, str(session_path), dest_override=str(export_path)
-                )
-
-            # Build the prompt - use same style as continue command
-            if agent == "claude":
-                full_prompt = f"""There is a log of a past conversation with an AI agent in this file: {export_path}
-
-Strategically use PARALLEL SUB-AGENTS to explore {export_path} (which may be very long) to answer the following question:
-
+Question:
 {query}
 
-DO NOT TRY TO READ {export_path} by YOURSELF! To save your own context, you must use parallel sub-agents, possibly to explore the beginning, middle, and end of that chat.
-
-Provide a clear and concise answer to the question."""
-            else:
-                full_prompt = f"""There is a log of a past conversation with an AI agent in this file: {export_path}
-
-CAUTION: {export_path} may be very large. Strategically use parallel sub-agents if available, or use another strategy to efficiently read the file so your context window is not overloaded. For example, you could read specific sections (beginning, middle, end) rather than the entire file at once.
-
-Based on the session log, answer the following question:
-
-{query}
+Sanitized transcript:
+{sanitized}
 
 Provide a clear and concise answer."""
 
@@ -331,6 +307,7 @@ Provide a clear and concise answer."""
                 cmd = [
                     "codex", "exec", "--json",
                     "--model", "gpt-5.1-codex-mini",
+                    "--skip-git-repo-check",
                     full_prompt,
                 ]
                 result = subprocess.run(
