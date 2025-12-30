@@ -74,6 +74,14 @@ def _iso_to_epoch_ms(iso_str: str) -> int:
         return 0
 
 
+def _safe_int(value: Any, default: int = 0) -> int:
+    """Best-effort int coercion with fallback."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 @dataclass
 class SearchResult:
     """A search result with metadata and snippet."""
@@ -177,6 +185,8 @@ class SessionIndex:
         self.schema_builder.add_text_field("first_msg_content", stored=True)
         self.schema_builder.add_text_field("last_msg_role", stored=True)
         self.schema_builder.add_text_field("last_msg_content", stored=True)
+        self.schema_builder.add_text_field("first_user_msg_content", stored=True)
+        self.schema_builder.add_integer_field("total_tokens", stored=True)
 
         # Session type fields (for filtering in TUI)
         self.schema_builder.add_text_field("derivation_type", stored=True)
@@ -325,6 +335,20 @@ class SessionIndex:
             doc.add_text("first_msg_content", first_msg.get("content", ""))
             doc.add_text("last_msg_role", last_msg.get("role", ""))
             doc.add_text("last_msg_content", last_msg.get("content", ""))
+            first_user_msg = metadata.get("first_user_msg", {}) or {}
+            if isinstance(first_user_msg, dict):
+                first_user_content = first_user_msg.get("content", "")
+            else:
+                first_user_content = str(first_user_msg)
+            doc.add_text("first_user_msg_content", first_user_content)
+            doc.add_integer("total_tokens", _safe_int(metadata.get("total_tokens")))
+            first_user_msg = metadata.get("first_user_msg", {}) or {}
+            if isinstance(first_user_msg, dict):
+                first_user_content = first_user_msg.get("content", "")
+            else:
+                first_user_content = str(first_user_msg)
+            doc.add_text("first_user_msg_content", first_user_content)
+            doc.add_integer("total_tokens", _safe_int(metadata.get("total_tokens")))
 
             # Session type fields
             doc.add_text("derivation_type", metadata.get("derivation_type", "") or "")
@@ -629,6 +653,8 @@ class SessionIndex:
             # Map metadata fields to expected format
             first_msg = metadata.get("first_msg") or {"role": "", "content": ""}
             last_msg = metadata.get("last_msg") or {"role": "", "content": ""}
+            first_user_msg = metadata.get("first_user_msg") or {"role": "", "content": ""}
+            total_tokens = metadata.get("total_tokens")
 
             # Always use filename-derived session_id (the canonical identifier)
             # Internal sessionId field can be stale in forked sessions
@@ -654,7 +680,9 @@ class SessionIndex:
                 "content": content,
                 "first_msg": first_msg,
                 "last_msg": last_msg,
+                "first_user_msg": first_user_msg,
                 "lines": msg_count,
+                "total_tokens": total_tokens,
                 "file_path": str(jsonl_path),
             }
         except Exception as e:
@@ -736,6 +764,7 @@ class SessionIndex:
             metadata = parsed["metadata"]
             first_msg = parsed["first_msg"]
             last_msg = parsed["last_msg"]
+            first_user_msg = parsed.get("first_user_msg", {}) or {}
 
             # Skip helper sessions (SDK/headless sessions used for analysis)
             if metadata.get("session_type") == "helper":
@@ -779,6 +808,12 @@ class SessionIndex:
                 doc.add_text("first_msg_content", first_msg.get("content", ""))
                 doc.add_text("last_msg_role", last_msg.get("role", ""))
                 doc.add_text("last_msg_content", last_msg.get("content", ""))
+                if isinstance(first_user_msg, dict):
+                    first_user_content = first_user_msg.get("content", "")
+                else:
+                    first_user_content = str(first_user_msg)
+                doc.add_text("first_user_msg_content", first_user_content)
+                doc.add_integer("total_tokens", _safe_int(parsed.get("total_tokens")))
 
                 # Session type fields
                 doc.add_text(
@@ -1001,6 +1036,8 @@ class SessionIndex:
             first_msg_content = doc.get_first("first_msg_content") or ""
             last_msg_role = doc.get_first("last_msg_role") or ""
             last_msg_content = doc.get_first("last_msg_content") or ""
+            first_user_msg_content = doc.get_first("first_user_msg_content") or ""
+            total_tokens = _safe_int(doc.get_first("total_tokens"))
 
             results.append({
                 "session_id": session_id,
@@ -1018,6 +1055,8 @@ class SessionIndex:
                 "first_msg_content": first_msg_content,
                 "last_msg_role": last_msg_role,
                 "last_msg_content": last_msg_content,
+                "first_user_msg_content": first_user_msg_content,
+                "total_tokens": total_tokens,
             })
 
             if len(results) >= limit:
@@ -1081,6 +1120,8 @@ class SessionIndex:
                 "first_msg_content": doc.get_first("first_msg_content") or "",
                 "last_msg_role": doc.get_first("last_msg_role") or "",
                 "last_msg_content": doc.get_first("last_msg_content") or "",
+                "first_user_msg_content": doc.get_first("first_user_msg_content") or "",
+                "total_tokens": _safe_int(doc.get_first("total_tokens")),
                 "claude_home": doc.get_first("claude_home") or "",
             })
 
@@ -1180,6 +1221,8 @@ class SessionIndex:
                 "first_msg_content": doc.get_first("first_msg_content") or "",
                 "last_msg_role": doc.get_first("last_msg_role") or "",
                 "last_msg_content": doc.get_first("last_msg_content") or "",
+                "first_user_msg_content": doc.get_first("first_user_msg_content") or "",
+                "total_tokens": _safe_int(doc.get_first("total_tokens")),
                 "derivation_type": doc.get_first("derivation_type") or "",
                 "is_sidechain": doc.get_first("is_sidechain") or "false",
             }
