@@ -2039,9 +2039,19 @@ fn render_preview(frame: &mut Frame, app: &mut App, t: &Theme, area: Rect) {
         lines.push(Line::from(""));
     }
 
-    // First message - labeled as "FIRST MESSAGE"
-    if !s.first_msg_content.is_empty() {
-        let (role_label, label_color, bubble_bg) = if s.first_msg_role == "user" {
+    // First user message (fallback to first message) - labeled as "FIRST"
+    let first_preview_content = if !s.first_user_msg_content.is_empty() {
+        &s.first_user_msg_content
+    } else {
+        &s.first_msg_content
+    };
+    let first_preview_role = if !s.first_user_msg_content.is_empty() {
+        "user"
+    } else {
+        s.first_msg_role.as_str()
+    };
+    if !first_preview_content.is_empty() {
+        let (role_label, label_color, bubble_bg) = if first_preview_role == "user" {
             ("User", t.user_label, t.user_bubble_bg)
         } else if s.agent == "claude" {
             ("Claude", t.claude_source, t.claude_bubble_bg)
@@ -2054,7 +2064,7 @@ fn render_preview(frame: &mut Frame, app: &mut App, t: &Theme, area: Rect) {
             Span::styled(role_label, Style::default().fg(label_color).add_modifier(Modifier::BOLD)),
         ]));
 
-        for wrapped in wrap_text(&s.first_msg_content, bubble_width).iter().take(6) {
+        for wrapped in wrap_text(first_preview_content, bubble_width).iter().take(6) {
             let padding = bubble_width.saturating_sub(wrapped.chars().count());
             lines.push(Line::from(vec![
                 Span::styled(" ", Style::default().bg(bubble_bg)),

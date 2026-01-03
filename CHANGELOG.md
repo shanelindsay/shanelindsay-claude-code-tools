@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.3.19 - 2025-12-30
+- Show first user message in the preview pane (fallback to first message).
+
 ## 1.3.18 - 2025-12-30
 - Use last assistant message as the default preview snippet when not searching.
 - Add an `about` field (last assistant message fallback) to JSON output.
